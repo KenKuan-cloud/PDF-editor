@@ -214,10 +214,21 @@
   <div class="modal-footer"><button class="btn" onclick="closeOrganizer()">Cancel</button><button class="btn btn-accent" onclick="applyOrganizer()">Apply Changes</button></div>
 </div></div>
 
+<!-- Password Modal -->
+<div class="modal-overlay hidden" id="pwModal"><div class="modal" style="width:400px;max-width:92vw">
+  <div class="modal-header"><h3>Password Protected PDF</h3><button class="btn-close" id="pwModalClose">&times;</button></div>
+  <div class="modal-body" style="padding:20px">
+    <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px" id="pwModalMsg">This PDF is password protected. Enter the password to open it.</p>
+    <input type="password" id="pwInput" placeholder="Enter password…" autocomplete="current-password" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 12px;font-size:14px;font-family:'DM Sans',sans-serif;outline:none;transition:border-color .15s" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+  </div>
+  <div class="modal-footer"><button class="btn" id="pwCancelBtn">Cancel</button><button class="btn btn-accent" id="pwSubmitBtn">Unlock</button></div>
+</div></div>
+
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 let pdfDoc=null,pdfBytes=null,currentPage=1,totalPages=0,scale=1.5;
+let currentPdfPassword=null,_pwLoadingTask=null,_pwCallback=null;
 let currentTool='select',isDrawing=false,fileName='';
 let annotations={},pageRotations={},pageElements=[];
 let prevToolBeforeSpace=null,isPanning=false,panStart={x:0,y:0},scrollStart={x:0,y:0};
@@ -230,9 +241,15 @@ function clearSel() { if(sel){sel.overlay.remove();sel=null;} }
 // ══════ File Handling ══════
 function openFile(){document.getElementById('fileInput').click()}
 document.getElementById('fileInput').addEventListener('change',e=>{if(e.target.files[0])handleFile(e.target.files[0]);e.target.value=''});
-async function handleFile(f){if(!f||f.type!=='application/pdf')return;fileName=f.name;document.getElementById('fileName').textContent=fileName;pdfBytes=new Uint8Array(await f.arrayBuffer());annotations={};pageRotations={};await reloadFromBytes()}
+async function handleFile(f){if(!f||f.type!=='application/pdf')return;fileName=f.name;document.getElementById('fileName').textContent=fileName;pdfBytes=new Uint8Array(await f.arrayBuffer());annotations={};pageRotations={};currentPdfPassword=null;await reloadFromBytes()}
 async function reloadFromBytes(){
-  pdfDoc=await pdfjsLib.getDocument({data:pdfBytes.slice()}).promise;totalPages=pdfDoc.numPages;
+  const lt=pdfjsLib.getDocument({data:pdfBytes.slice()});_pwLoadingTask=lt;
+  lt.onPassword=(cb,reason)=>{
+    const msg=reason===pdfjsLib.PasswordResponses.INCORRECT_PASSWORD?'Incorrect password. Please try again.':'This PDF is password protected. Enter the password to open it.';
+    showPasswordModal(msg,pw=>{currentPdfPassword=pw;cb(pw)});
+  };
+  try{pdfDoc=await lt.promise;}catch(e){_pwLoadingTask=null;return;}
+  _pwLoadingTask=null;totalPages=pdfDoc.numPages;
   document.getElementById('pageCount').textContent=totalPages;document.getElementById('pageInput').max=totalPages;
   document.getElementById('dropzone').classList.add('hidden');
   ['sidebar','canvasArea','toolbar','bottombar'].forEach(id=>document.getElementById(id).classList.remove('hidden'));
@@ -633,9 +650,9 @@ function clearAnnotations(){annotations[currentPage]=[];clearSel();redrawAnns(pa
 function mergeFile(){document.getElementById('mergeInput').click()}
 document.getElementById('mergeInput').addEventListener('change',async e=>{
   const files=Array.from(e.target.files);e.target.value='';if(!files.length||!pdfBytes)return;
-  try{const{PDFDocument}=PDFLib;const main=await PDFDocument.load(pdfBytes);
+  try{const{PDFDocument}=PDFLib;const main=await PDFDocument.load(pdfBytes,currentPdfPassword?{password:currentPdfPassword}:{});
     for(const f of files){if(f.type!=='application/pdf')continue;const src=await PDFDocument.load(new Uint8Array(await f.arrayBuffer()));const cp=await main.copyPages(src,src.getPageIndices());for(const p of cp)main.addPage(p)}
-    pdfBytes=new Uint8Array(await main.save());await reloadFromBytes();scrollToPage(totalPages);
+    pdfBytes=new Uint8Array(await main.save());currentPdfPassword=null;await reloadFromBytes();scrollToPage(totalPages);
   }catch(err){alert('Merge error: '+err.message)}
 });
 
@@ -665,17 +682,17 @@ async function renderOrgGrid(){
 }
 async function applyOrganizer(){
   if(!orgOrder.length){alert('No pages.');return}
-  try{const{PDFDocument}=PDFLib;const src=await PDFDocument.load(pdfBytes);const doc=await PDFDocument.create();
+  try{const{PDFDocument}=PDFLib;const src=await PDFDocument.load(pdfBytes,currentPdfPassword?{password:currentPdfPassword}:{});const doc=await PDFDocument.create();
     const nA={},nR={};
     for(let i=0;i<orgOrder.length;i++){const sp=orgOrder[i];const[cp]=await doc.copyPages(src,[sp-1]);doc.addPage(cp);
       if(annotations[sp]&&annotations[sp].length)nA[i+1]=[...annotations[sp]];if(pageRotations[sp])nR[i+1]=pageRotations[sp]}
-    pdfBytes=new Uint8Array(await doc.save());annotations=nA;pageRotations=nR;currentPage=1;closeOrganizer();await reloadFromBytes();
+    pdfBytes=new Uint8Array(await doc.save());currentPdfPassword=null;annotations=nA;pageRotations=nR;currentPage=1;closeOrganizer();await reloadFromBytes();
   }catch(err){alert('Error: '+err.message)}
 }
 
 // ══════ Save ══════
 async function savePdf(){
-  if(!pdfBytes)return;const{PDFDocument,rgb,degrees}=PDFLib;const doc=await PDFDocument.load(pdfBytes);const pages=doc.getPages();
+  if(!pdfBytes)return;const{PDFDocument,rgb,degrees}=PDFLib;const doc=await PDFDocument.load(pdfBytes,currentPdfPassword?{password:currentPdfPassword}:{});const pages=doc.getPages();
   for(let pn=1;pn<=totalPages;pn++){
     const pg=pages[pn-1];const rot=pageRotations[pn]||0;if(rot)pg.setRotation(degrees(rot));
     const anns=getAnns(pn);if(!anns.length)continue;
@@ -785,6 +802,32 @@ function searchNav(dir){
   highlightCurrent();
 }
 
+// ══════ Password Modal ══════
+function showPasswordModal(msg,onSubmit){
+  _pwCallback=onSubmit;
+  document.getElementById('pwModalMsg').textContent=msg;
+  document.getElementById('pwInput').value='';
+  document.getElementById('pwModal').classList.remove('hidden');
+  setTimeout(()=>document.getElementById('pwInput').focus(),50);
+}
+function _cancelPassword(){
+  document.getElementById('pwModal').classList.add('hidden');
+  _pwCallback=null;
+  if(_pwLoadingTask){_pwLoadingTask.destroy();_pwLoadingTask=null;}
+  if(!pdfDoc)document.getElementById('fileName').textContent='No file loaded';
+}
+document.getElementById('pwSubmitBtn').addEventListener('click',()=>{
+  const pw=document.getElementById('pwInput').value;
+  document.getElementById('pwModal').classList.add('hidden');
+  if(_pwCallback){const cb=_pwCallback;_pwCallback=null;cb(pw);}
+});
+document.getElementById('pwCancelBtn').addEventListener('click',_cancelPassword);
+document.getElementById('pwModalClose').addEventListener('click',_cancelPassword);
+document.getElementById('pwInput').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();document.getElementById('pwSubmitBtn').click();}
+  if(e.key==='Escape'){e.preventDefault();_cancelPassword();}
+});
+
 // ══════ Drag & Drop ══════
 document.body.addEventListener('dragover',e=>{e.preventDefault();document.getElementById('dropzoneBox')?.classList.add('dragover')});
 document.body.addEventListener('dragleave',()=>document.getElementById('dropzoneBox')?.classList.remove('dragover'));
@@ -797,7 +840,7 @@ document.addEventListener('keydown',e=>{
   if(e.target.contentEditable==='true'||e.target.tagName==='INPUT')return;
   if((e.key==='Delete'||e.key==='Backspace')&&sel){e.preventDefault();deleteAnn(sel.entry,sel.index);return}
   if(e.key==='Enter'&&sel){const a=getAnns(sel.entry.pageNum)[sel.index];if(a&&a.type==='text'){e.preventDefault();editText(sel.entry,sel.index)}return}
-  if(e.key==='Escape'){clearSel();closeSearch();closeOrganizer();return}
+  if(e.key==='Escape'){clearSel();closeSearch();closeOrganizer();_cancelPassword();return}
   if(e.ctrlKey||e.metaKey){if(e.key==='z'){e.preventDefault();undoLast()}if(e.key==='s'){e.preventDefault();savePdf()}if(e.key==='o'){e.preventDefault();openFile()}if(e.key==='='){e.preventDefault();zoomIn()}if(e.key==='-'){e.preventDefault();zoomOut()}return}
   if(e.code==='Space'&&!e.repeat&&currentTool!=='hand'){e.preventDefault();prevToolBeforeSpace=currentTool;setTool('hand');return}
   if(e.key==='ArrowUp'||e.key==='ArrowLeft'){e.preventDefault();scrollToPage(currentPage-1)}
