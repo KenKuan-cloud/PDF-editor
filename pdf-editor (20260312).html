@@ -228,7 +228,7 @@
 pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 let pdfDoc=null,pdfBytes=null,currentPage=1,totalPages=0,scale=1.5;
-let currentPdfPassword=null,_pwLoadingTask=null,_pwCallback=null;
+let currentPdfPassword=null,isPasswordProtected=false,_pwLoadingTask=null,_pwCallback=null;
 let currentTool='select',isDrawing=false,fileName='';
 let annotations={},pageRotations={},pageElements=[];
 let prevToolBeforeSpace=null,isPanning=false,panStart={x:0,y:0},scrollStart={x:0,y:0};
@@ -241,10 +241,11 @@ function clearSel() { if(sel){sel.overlay.remove();sel=null;} }
 // ══════ File Handling ══════
 function openFile(){document.getElementById('fileInput').click()}
 document.getElementById('fileInput').addEventListener('change',e=>{if(e.target.files[0])handleFile(e.target.files[0]);e.target.value=''});
-async function handleFile(f){if(!f||f.type!=='application/pdf')return;fileName=f.name;document.getElementById('fileName').textContent=fileName;pdfBytes=new Uint8Array(await f.arrayBuffer());annotations={};pageRotations={};currentPdfPassword=null;await reloadFromBytes()}
+async function handleFile(f){if(!f||f.type!=='application/pdf')return;fileName=f.name;document.getElementById('fileName').textContent=fileName;pdfBytes=new Uint8Array(await f.arrayBuffer());annotations={};pageRotations={};currentPdfPassword=null;isPasswordProtected=false;await reloadFromBytes()}
 async function reloadFromBytes(){
   const lt=pdfjsLib.getDocument({data:pdfBytes.slice()});_pwLoadingTask=lt;
   lt.onPassword=(cb,reason)=>{
+    isPasswordProtected=true;
     const msg=reason===pdfjsLib.PasswordResponses.INCORRECT_PASSWORD?'Incorrect password. Please try again.':'This PDF is password protected. Enter the password to open it.';
     showPasswordModal(msg,pw=>{currentPdfPassword=pw;cb(pw)});
   };
@@ -691,8 +692,48 @@ async function applyOrganizer(){
 }
 
 // ══════ Save ══════
+async function createPasswordFreeDocument(){
+  const{PDFDocument,StandardFonts,degrees}=PDFLib;
+  if(!isPasswordProtected)return PDFDocument.load(pdfBytes);
+
+  // pdf-lib cannot decrypt encrypted PDFs. pdf.js already has an unlocked
+  // document, so rebuild each page from that view before applying edits. A
+  // newly-created PDF has no encryption dictionary or source password.
+  const doc=await PDFDocument.create();
+  const textFont=await doc.embedFont(StandardFonts.Helvetica);
+  for(let pn=1;pn<=totalPages;pn++){
+    const sourcePage=await pdfDoc.getPage(pn);
+    const outputViewport=sourcePage.getViewport({scale:1,rotation:0});
+    // The image preserves graphics that cannot be translated to pdf-lib. Keep
+    // it modest and add the real words separately so exports stay searchable
+    // and substantially smaller than the previous 2x/95% raster pages.
+    const renderViewport=sourcePage.getViewport({scale:1.25,rotation:0});
+    const canvas=document.createElement('canvas');
+    canvas.width=Math.ceil(renderViewport.width);canvas.height=Math.ceil(renderViewport.height);
+    const ctx=canvas.getContext('2d',{alpha:false});ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
+    await sourcePage.render({canvasContext:ctx,viewport:renderViewport}).promise;
+    const image=await doc.embedJpg(canvas.toDataURL('image/jpeg',.82));
+    const page=doc.addPage([outputViewport.width,outputViewport.height]);
+    page.drawImage(image,{x:0,y:0,width:outputViewport.width,height:outputViewport.height});
+    try{
+      const textContent=await sourcePage.getTextContent();
+      for(const item of textContent.items){
+        if(!item.str)continue;
+        const t=item.transform,size=Math.hypot(t[2],t[3]);
+        if(!size)continue;
+        // Standard Helvetica cannot encode every PDF glyph. Validate each run
+        // independently; unsupported runs simply retain the image fallback.
+        try{textFont.encodeText(item.str)}catch(e){continue}
+        page.drawText(item.str,{x:t[4],y:t[5],size,font:textFont,rotate:degrees(Math.atan2(t[1],t[0])*180/Math.PI),opacity:0});
+      }
+    }catch(e){/* Text extraction failed; the page image remains the fallback. */}
+    canvas.width=canvas.height=1;
+  }
+  return doc;
+}
 async function savePdf(){
-  if(!pdfBytes)return;const{PDFDocument,rgb,degrees}=PDFLib;const doc=await PDFDocument.load(pdfBytes,currentPdfPassword?{password:currentPdfPassword}:{});const pages=doc.getPages();
+  if(!pdfBytes)return;const{rgb,degrees}=PDFLib;const saveBtn=document.getElementById('saveBtn');saveBtn.disabled=true;
+  try{const doc=await createPasswordFreeDocument();const pages=doc.getPages();
   for(let pn=1;pn<=totalPages;pn++){
     const pg=pages[pn-1];const rot=pageRotations[pn]||0;if(rot)pg.setRotation(degrees(rot));
     const anns=getAnns(pn);if(!anns.length)continue;
@@ -714,6 +755,7 @@ async function savePdf(){
   }
   const saved=await doc.save();const url=URL.createObjectURL(new Blob([saved],{type:'application/pdf'}));
   const lnk=document.createElement('a');lnk.href=url;lnk.download=fileName.replace('.pdf','')+'_edited.pdf';lnk.click();URL.revokeObjectURL(url);
+  }catch(err){alert('Save error: '+err.message)}finally{saveBtn.disabled=false}
 }
 function hexRgb(h){return{r:parseInt(h.slice(1,3),16)/255,g:parseInt(h.slice(3,5),16)/255,b:parseInt(h.slice(5,7),16)/255}}
 
