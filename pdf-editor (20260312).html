@@ -123,12 +123,13 @@
 
   /* ── Table Editor Overlay ── */
   .table-overlay{position:absolute;z-index:55;background:#fff;border:2px solid var(--accent);border-radius:4px;box-shadow:0 4px 16px rgba(0,0,0,.3);overflow:visible}
-  .table-overlay table{border-collapse:collapse;width:auto;table-layout:fixed}
-  .table-overlay td{border:1px solid #bbb;padding:4px 6px;font-family:'DM Sans',sans-serif;color:#000;min-width:40px;min-height:20px;outline:none;word-break:break-word;background:#fff;vertical-align:top;position:relative}
+  .table-overlay table{border-collapse:collapse;table-layout:auto}
+  .table-overlay td{border:1px solid #bbb;padding:4px 6px;font-family:'DM Sans',sans-serif;color:#000;outline:none;word-break:break-word;background:#fff;vertical-align:top;overflow:hidden;box-sizing:border-box}
   .table-overlay td:focus{background:rgba(108,138,255,.08);outline:2px solid var(--accent);outline-offset:-2px}
-  .table-overlay .col-resize-handle{position:absolute;top:0;right:-3px;width:6px;height:100%;cursor:col-resize;z-index:2}
+  .table-overlay .td-wrap{position:relative;width:100%;height:100%}
+  .table-overlay .col-resize-handle{position:absolute;top:0;right:-7px;width:8px;height:100%;cursor:col-resize;z-index:2}
   .table-overlay .col-resize-handle:hover,.table-overlay .col-resize-handle.active{background:var(--accent);opacity:.5}
-  .table-overlay .row-resize-handle{position:absolute;bottom:-3px;left:0;width:100%;height:6px;cursor:row-resize;z-index:2}
+  .table-overlay .row-resize-handle{position:absolute;bottom:-7px;left:0;width:100%;height:8px;cursor:row-resize;z-index:2}
   .table-overlay .row-resize-handle:hover,.table-overlay .row-resize-handle.active{background:var(--accent);opacity:.5}
   .table-toolbar{position:absolute;top:-40px;left:50%;transform:translateX(-50%);display:flex;gap:3px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:3px 5px;box-shadow:0 4px 16px rgba(0,0,0,.4);white-space:nowrap;z-index:56}
   .table-toolbar button{display:flex;align-items:center;gap:3px;padding:4px 8px;border:none;border-radius:5px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:600;cursor:pointer;transition:background .12s;background:var(--surface2);color:var(--text)}
@@ -791,7 +792,6 @@ function createTableOverlay(entry,x,y,rows,cols,existingAnn,existingIdx){
   ov.style.left=x+'px';ov.style.top=y+'px';
   const colWidths=existingAnn?[...existingAnn.colWidths]:Array(cols).fill(colW);
   const rowHeights=existingAnn?[...existingAnn.rowHeights]:Array(rows).fill(rowH);
-  ov.style.width=colWidths.reduce((s,v)=>s+v,0)+'px';
 
   const toolbar=document.createElement('div');toolbar.className='table-toolbar';
   toolbar.innerHTML=`<button class="tbl-act" onclick="tblAddRow(this)">+Row</button>
@@ -811,10 +811,11 @@ function createTableOverlay(entry,x,y,rows,cols,existingAnn,existingIdx){
   for(let r=0;r<rows;r++){
     const tr=document.createElement('tr');
     for(let c=0;c<cols;c++){
-      const td=document.createElement('td');td.contentEditable=true;td.textContent=cells[r][c];
+      const td=document.createElement('td');td.contentEditable=true;
       td.style.width=colWidths[c]+'px';td.style.height=rowHeights[r]+'px';
       td.style.fontSize=tblFontSize+'px';
-      addCellResizeHandles(entry,td,r,c);
+      td.style.minWidth=colWidths[c]+'px';td.style.maxWidth=colWidths[c]+'px';
+      td.textContent=cells[r][c];
       td.addEventListener('focus',()=>{
         const cw=toolbar.querySelector('.tbl-col-w');
         const rh=toolbar.querySelector('.tbl-row-h');
@@ -828,55 +829,69 @@ function createTableOverlay(entry,x,y,rows,cols,existingAnn,existingIdx){
     tbl.appendChild(tr);
   }
   ov.appendChild(tbl);
+  addResizeHandlesToTable(entry,tbl);
   entry.wrapper.appendChild(ov);
   entry._activeTable={el:ov,x,y,existingIdx:existingIdx!==undefined?existingIdx:null,fontSize:tblFontSize};
   tbl.querySelector('td').focus();
 }
 
-function addCellResizeHandles(entry,td,rowIdx,colIdx){
-  const colHandle=document.createElement('div');colHandle.className='col-resize-handle';
-  colHandle.addEventListener('mousedown',ev=>{ev.preventDefault();ev.stopPropagation();startColResize(entry,td,colIdx,ev)});
-  td.appendChild(colHandle);
-  const rowHandle=document.createElement('div');rowHandle.className='row-resize-handle';
-  rowHandle.addEventListener('mousedown',ev=>{ev.preventDefault();ev.stopPropagation();startRowResize(entry,td,rowIdx,ev)});
-  td.appendChild(rowHandle);
+function addResizeHandlesToTable(entry,tbl){
+  const ov=entry._activeTable?entry._activeTable.el:tbl.closest('.table-overlay');
+  ov.querySelectorAll('.col-resize-handle,.row-resize-handle').forEach(h=>h.remove());
+  const rows=tbl.rows.length,cols=tbl.rows[0]?tbl.rows[0].cells.length:0;
+  for(let c=0;c<cols;c++){
+    const td=tbl.rows[0].cells[c];
+    const h=document.createElement('div');h.className='col-resize-handle';
+    let left=0;for(let ci=0;ci<=c;ci++)left+=tbl.rows[0].cells[ci].offsetWidth;
+    h.style.position='absolute';h.style.top='0';h.style.left=(left-4)+'px';h.style.height=tbl.offsetHeight+'px';
+    h.addEventListener('mousedown',ev=>{ev.preventDefault();ev.stopPropagation();startColResize(entry,tbl,c,ev)});
+    ov.appendChild(h);
+  }
+  for(let r=0;r<rows;r++){
+    const h=document.createElement('div');h.className='row-resize-handle';
+    let top=0;for(let ri=0;ri<=r;ri++)top+=tbl.rows[ri].cells[0].offsetHeight;
+    h.style.position='absolute';h.style.left='0';h.style.top=(top-4)+'px';h.style.width=tbl.offsetWidth+'px';
+    h.addEventListener('mousedown',ev=>{ev.preventDefault();ev.stopPropagation();startRowResize(entry,tbl,r,ev)});
+    ov.appendChild(h);
+  }
 }
 
-function startColResize(entry,td,colIdx,e){
-  const tbl=entry._activeTable.el.querySelector('table');
+function startColResize(entry,tbl,colIdx,e){
   const startX=e.clientX;
-  const startW=td.offsetWidth;
-  const handle=td.querySelector('.col-resize-handle');
-  handle.classList.add('active');
+  const startW=tbl.rows[0].cells[colIdx].offsetWidth;
   function onMove(ev){
     const newW=Math.max(40,startW+(ev.clientX-startX));
-    for(const tr of tbl.rows){tr.cells[colIdx].style.width=newW+'px'}
-    updateTblOverlayWidth(entry);
+    for(const tr of tbl.rows){
+      tr.cells[colIdx].style.width=newW+'px';
+      tr.cells[colIdx].style.minWidth=newW+'px';
+      tr.cells[colIdx].style.maxWidth=newW+'px';
+    }
+    rebuildResizeHandles(entry);
   }
-  function onUp(){handle.classList.remove('active');window.removeEventListener('mousemove',onMove);window.removeEventListener('mouseup',onUp);
-    const cw=entry._activeTable.el.querySelector('.tbl-col-w');if(cw)cw.value=parseInt(td.style.width)}
+  function onUp(){window.removeEventListener('mousemove',onMove);window.removeEventListener('mouseup',onUp);
+    rebuildResizeHandles(entry);
+    const cw=entry._activeTable.el.querySelector('.tbl-col-w');if(cw)cw.value=Math.round(tbl.rows[0].cells[colIdx].offsetWidth)}
   window.addEventListener('mousemove',onMove);window.addEventListener('mouseup',onUp);
 }
 
-function startRowResize(entry,td,rowIdx,e){
-  const tbl=entry._activeTable.el.querySelector('table');
+function startRowResize(entry,tbl,rowIdx,e){
   const startY=e.clientY;
-  const startH=td.offsetHeight;
-  const handle=td.querySelector('.row-resize-handle');
-  handle.classList.add('active');
+  const startH=tbl.rows[rowIdx].cells[0].offsetHeight;
   function onMove(ev){
     const newH=Math.max(20,startH+(ev.clientY-startY));
     for(const c of tbl.rows[rowIdx].cells){c.style.height=newH+'px'}
+    rebuildResizeHandles(entry);
   }
-  function onUp(){handle.classList.remove('active');window.removeEventListener('mousemove',onMove);window.removeEventListener('mouseup',onUp);
-    const rh=entry._activeTable.el.querySelector('.tbl-row-h');if(rh)rh.value=parseInt(td.style.height)}
+  function onUp(){window.removeEventListener('mousemove',onMove);window.removeEventListener('mouseup',onUp);
+    rebuildResizeHandles(entry);
+    const rh=entry._activeTable.el.querySelector('.tbl-row-h');if(rh)rh.value=Math.round(tbl.rows[rowIdx].cells[0].offsetHeight)}
   window.addEventListener('mousemove',onMove);window.addEventListener('mouseup',onUp);
 }
 
-function updateTblOverlayWidth(entry){
+function rebuildResizeHandles(entry){
+  if(!entry._activeTable)return;
   const tbl=entry._activeTable.el.querySelector('table');
-  let w=0;for(const c of tbl.rows[0].cells)w+=c.offsetWidth;
-  entry._activeTable.el.style.width=w+'px';
+  if(tbl)addResizeHandlesToTable(entry,tbl);
 }
 
 function tblSetFontSize(input){
@@ -892,8 +907,8 @@ function tblSetColWidth(input){
   const tbl=entry._activeTable.el.querySelector('table');
   const w=Math.max(40,parseInt(input.value)||90);
   const colIdx=input._targetCol!==undefined?input._targetCol:0;
-  for(const tr of tbl.rows)tr.cells[colIdx].style.width=w+'px';
-  updateTblOverlayWidth(entry);
+  for(const tr of tbl.rows){tr.cells[colIdx].style.width=w+'px';tr.cells[colIdx].style.minWidth=w+'px';tr.cells[colIdx].style.maxWidth=w+'px'}
+  rebuildResizeHandles(entry);
 }
 
 function tblSetRowHeight(input){
@@ -902,6 +917,7 @@ function tblSetRowHeight(input){
   const h=Math.max(20,parseInt(input.value)||32);
   const rowIdx=input._targetRow!==undefined?input._targetRow:0;
   for(const c of tbl.rows[rowIdx].cells)c.style.height=h+'px';
+  rebuildResizeHandles(entry);
 }
 
 function getTableOverlayEntry(btnEl){
@@ -914,32 +930,32 @@ function tblAddRow(btn){
   const entry=getTableOverlayEntry(btn);if(!entry)return;
   const tbl=entry._activeTable.el.querySelector('table');
   const cols=tbl.rows[0]?tbl.rows[0].cells.length:1;
-  const newRowIdx=tbl.rows.length;
   const fs=entry._activeTable.fontSize||13;
   const tr=document.createElement('tr');
-  for(let c=0;c<cols;c++){const td=document.createElement('td');td.contentEditable=true;td.style.width=tbl.rows[0].cells[c].style.width;td.style.height='32px';td.style.fontSize=fs+'px';addCellResizeHandles(entry,td,newRowIdx,c);tr.appendChild(td)}
+  for(let c=0;c<cols;c++){const td=document.createElement('td');td.contentEditable=true;const w=tbl.rows[0].cells[c].style.width;td.style.width=w;td.style.minWidth=w;td.style.maxWidth=w;td.style.height='32px';td.style.fontSize=fs+'px';tr.appendChild(td)}
   tbl.appendChild(tr);
+  rebuildResizeHandles(entry);
 }
 function tblAddCol(btn){
   const entry=getTableOverlayEntry(btn);if(!entry)return;
   const tbl=entry._activeTable.el.querySelector('table');
   const fs=entry._activeTable.fontSize||13;
-  const newColIdx=tbl.rows[0]?tbl.rows[0].cells.length:0;
-  for(let ri=0;ri<tbl.rows.length;ri++){const tr=tbl.rows[ri];const td=document.createElement('td');td.contentEditable=true;td.style.width='90px';td.style.height=tr.cells[0]?.style.height||'32px';td.style.fontSize=fs+'px';addCellResizeHandles(entry,td,ri,newColIdx);tr.appendChild(td)}
-  updateTblOverlayWidth(entry);
+  for(let ri=0;ri<tbl.rows.length;ri++){const tr=tbl.rows[ri];const td=document.createElement('td');td.contentEditable=true;td.style.width='90px';td.style.minWidth='90px';td.style.maxWidth='90px';td.style.height=tr.cells[0]?.style.height||'32px';td.style.fontSize=fs+'px';tr.appendChild(td)}
+  rebuildResizeHandles(entry);
 }
 function tblDelRow(btn){
   const entry=getTableOverlayEntry(btn);if(!entry)return;
   const tbl=entry._activeTable.el.querySelector('table');
   if(tbl.rows.length<=1)return;
   tbl.deleteRow(tbl.rows.length-1);
+  rebuildResizeHandles(entry);
 }
 function tblDelCol(btn){
   const entry=getTableOverlayEntry(btn);if(!entry)return;
   const tbl=entry._activeTable.el.querySelector('table');
   if(!tbl.rows[0]||tbl.rows[0].cells.length<=1)return;
   for(const tr of tbl.rows)tr.deleteCell(tr.cells.length-1);
-  updateTblOverlayWidth(entry);
+  rebuildResizeHandles(entry);
 }
 
 function commitTable(btn){
