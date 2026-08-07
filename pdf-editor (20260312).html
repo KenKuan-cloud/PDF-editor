@@ -46,7 +46,7 @@
   .canvas-area{flex:1;display:flex;flex-direction:column;overflow:hidden}
   .viewport{flex:1;overflow:auto;position:relative;background:radial-gradient(circle at 50% 0%,rgba(108,138,255,.04) 0%,transparent 60%),var(--bg)}
   .viewport.hand-active{cursor:grab} .viewport.hand-active.grabbing{cursor:grabbing;user-select:none}
-  .pages-container{display:flex;flex-direction:column;align-items:center;padding:24px;gap:24px;min-height:100%}
+  .pages-container{display:flex;flex-direction:column;align-items:center;padding:24px;gap:24px;min-height:100%;width:fit-content;min-width:100%}
   .page-wrapper{position:relative;flex-shrink:0;box-shadow:0 4px 32px rgba(0,0,0,.4);border-radius:4px}
   .page-wrapper.active-page{box-shadow:0 0 0 2px var(--accent),0 4px 32px rgba(0,0,0,.4)}
   .page-number-badge{position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--surface2);border:1px solid var(--border);color:var(--text-dim);font-size:11px;font-family:'JetBrains Mono',monospace;padding:2px 10px;border-radius:10px;pointer-events:none;z-index:10;opacity:0;transition:opacity .2s}
