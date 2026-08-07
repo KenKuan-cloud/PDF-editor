@@ -307,18 +307,32 @@ async function buildAllPages(){
   }
 }
 async function renderPageCanvas(e){
+  if(e._renderTask){e._renderTask.cancel();e._renderTask=null}
   const pg=await pdfDoc.getPage(e.pageNum);const rot=pageRotations[e.pageNum]||0;
   const vp=pg.getViewport({scale,rotation:rot});
   const offscreen=document.createElement('canvas');
   offscreen.width=vp.width;offscreen.height=vp.height;
   const offCtx=offscreen.getContext('2d');
   offCtx.fillStyle='#ffffff';offCtx.fillRect(0,0,vp.width,vp.height);
-  await pg.render({canvasContext:offCtx,viewport:vp}).promise;
-  e.pdfCanvas.width=vp.width;e.pdfCanvas.height=vp.height;
+  const task=pg.render({canvasContext:offCtx,viewport:vp});
+  e._renderTask=task;
+  try{await task.promise}catch(ex){if(ex&&ex.name==='RenderingCancelledException')return;throw ex}
+  e._renderTask=null;
+  const oldW=e.pdfCanvas.width,oldH=e.pdfCanvas.height;
+  const needResize=oldW!==vp.width||oldH!==vp.height;
+  if(needResize){
+    e.pdfCanvas.style.width=vp.width+'px';e.pdfCanvas.style.height=vp.height+'px';
+    e.pdfCanvas.width=vp.width;e.pdfCanvas.height=vp.height;
+  }else{
+    e.pdfCtx.clearRect(0,0,oldW,oldH);
+  }
   e.pdfCtx.drawImage(offscreen,0,0);
-  e.annCanvas.width=vp.width;e.annCanvas.height=vp.height;
+  if(needResize){
+    e.annCanvas.style.width=vp.width+'px';e.annCanvas.style.height=vp.height+'px';
+    e.annCanvas.width=vp.width;e.annCanvas.height=vp.height;
+  }
   e.textLayer.style.width=vp.width+'px';e.textLayer.style.height=vp.height+'px';
-  await renderTextLayer(e, pg, vp);
+  await renderTextLayer(e,pg,vp);
   redrawAnns(e);
 }
 async function renderTextLayer(e, pg, vp){
@@ -371,9 +385,14 @@ async function renderThumbnails(){
 
 // ══════ Zoom / Rotate ══════
 function zoomIn(){scale=Math.min(scale+.25,5);updateZoom()} function zoomOut(){scale=Math.max(scale-.25,.5);updateZoom()}
-async function updateZoom(){document.getElementById('zoomLabel').textContent=Math.round(scale/1.5*100)+'%';clearSel();clearSearchHighlights();searchResults=[];searchIdx=-1;await rerenderAll();
-  // Re-run search if active
-  if(document.getElementById('searchInput').value.trim())doSearch();
+let _zoomTimer=null;
+function updateZoom(){
+  document.getElementById('zoomLabel').textContent=Math.round(scale/1.5*100)+'%';
+  clearSel();clearSearchHighlights();searchResults=[];searchIdx=-1;
+  if(_zoomTimer)clearTimeout(_zoomTimer);
+  _zoomTimer=setTimeout(async()=>{_zoomTimer=null;await rerenderAll();
+    if(document.getElementById('searchInput').value.trim())doSearch();
+  },80);
 }
 async function rotatePage(d){pageRotations[currentPage]=((pageRotations[currentPage]||0)+d+360)%360;await renderPageCanvas(pageElements[currentPage-1]);renderThumbnails()}
 
