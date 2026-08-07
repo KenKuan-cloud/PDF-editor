@@ -646,6 +646,10 @@ function attachListeners(entry){
 
   annCanvas.addEventListener('mousedown',e=>{if(currentTool!=='hand'&&currentTool!=='select')e.preventDefault()});
 
+  // Safety: if the mouse is released outside any annotation canvas (e.g. in the
+  // gutter between pages), reset the drawing state so it doesn't get stuck.
+  window.addEventListener('mouseup',()=>{if(isDrawing){isDrawing=false;annCanvas._dp=null;annCanvas._ss=null;redrawAnns(entry)}});
+
   // ── Select mode: text layer handles everything ──
   // In select mode, annCanvas has pointer-events:none, so text layer gets all clicks.
   // On mousedown: check for annotations first. If found, select it and block text selection.
@@ -1019,6 +1023,7 @@ function clearAnnotations(){annotations[currentPage]=[];clearSel();redrawAnns(pa
 function mergeFile(){document.getElementById('mergeInput').click()}
 document.getElementById('mergeInput').addEventListener('change',async e=>{
   const files=Array.from(e.target.files);e.target.value='';if(!files.length||!pdfBytes)return;
+  commitAllText();commitAllTables();
   try{const{PDFDocument}=PDFLib;const main=await PDFDocument.load(pdfBytes,currentPdfPassword?{password:currentPdfPassword}:{});
     for(const f of files){if(f.type!=='application/pdf')continue;const src=await PDFDocument.load(new Uint8Array(await f.arrayBuffer()));const cp=await main.copyPages(src,src.getPageIndices());for(const p of cp)main.addPage(p)}
     pdfBytes=new Uint8Array(await main.save());currentPdfPassword=null;await reloadFromBytes();scrollToPage(totalPages);
@@ -1051,6 +1056,7 @@ async function renderOrgGrid(){
 }
 async function applyOrganizer(){
   if(!orgOrder.length){alert('No pages.');return}
+  commitAllText();commitAllTables();
   try{const{PDFDocument}=PDFLib;const src=await PDFDocument.load(pdfBytes,currentPdfPassword?{password:currentPdfPassword}:{});const doc=await PDFDocument.create();
     const nA={},nR={};
     for(let i=0;i<orgOrder.length;i++){const sp=orgOrder[i];const[cp]=await doc.copyPages(src,[sp-1]);doc.addPage(cp);
@@ -1084,7 +1090,7 @@ async function createPasswordFreeDocument(){
   return doc;
 }
 async function savePdf(){
-  if(!pdfBytes)return;const{rgb,degrees}=PDFLib;const saveBtn=document.getElementById('saveBtn');saveBtn.disabled=true;
+  if(!pdfBytes)return;commitAllText();commitAllTables();const{rgb,degrees}=PDFLib;const saveBtn=document.getElementById('saveBtn');saveBtn.disabled=true;
   try{const doc=await createPasswordFreeDocument();const pages=doc.getPages();
   for(let pn=1;pn<=totalPages;pn++){
     const pg=pages[pn-1];const rot=pageRotations[pn]||0;if(rot)pg.setRotation(degrees(rot));
