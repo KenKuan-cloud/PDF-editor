@@ -120,6 +120,29 @@
   /* Search highlights */
   .search-hl{position:absolute;background:rgba(255,217,107,.35);border-radius:2px;pointer-events:none;z-index:5}
   .search-hl.active{background:rgba(255,140,0,.55);box-shadow:0 0 0 2px rgba(255,140,0,.7)}
+
+  /* ── Table Editor Overlay ── */
+  .table-overlay{position:absolute;z-index:55;background:#fff;border:2px solid var(--accent);border-radius:4px;box-shadow:0 4px 16px rgba(0,0,0,.3);overflow:visible}
+  .table-overlay table{border-collapse:collapse;width:100%;table-layout:fixed}
+  .table-overlay td{border:1px solid #bbb;padding:4px 6px;font-family:'DM Sans',sans-serif;font-size:13px;color:#000;min-width:60px;min-height:24px;outline:none;word-break:break-word;background:#fff}
+  .table-overlay td:focus{background:rgba(108,138,255,.08);outline:2px solid var(--accent);outline-offset:-2px}
+  .table-toolbar{position:absolute;top:-38px;left:50%;transform:translateX(-50%);display:flex;gap:3px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:3px 5px;box-shadow:0 4px 16px rgba(0,0,0,.4);white-space:nowrap;z-index:56}
+  .table-toolbar button{display:flex;align-items:center;gap:3px;padding:4px 8px;border:none;border-radius:5px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:600;cursor:pointer;transition:background .12s;background:var(--surface2);color:var(--text)}
+  .table-toolbar button:hover{background:var(--border)}
+  .table-toolbar .tbl-done{background:var(--accent);color:#fff}
+  .table-toolbar .tbl-done:hover{background:#5a7af0}
+  .table-toolbar .tbl-del{background:rgba(255,107,107,.15);color:#ff6b6b}
+  .table-toolbar .tbl-del:hover{background:#ff6b6b;color:#fff}
+
+  /* ── Table Config Modal ── */
+  .table-config-modal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:600;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)}
+  .table-config-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;width:320px;box-shadow:0 16px 48px rgba(0,0,0,.5)}
+  .table-config-box h3{font-size:15px;font-weight:600;margin-bottom:16px}
+  .table-config-row{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+  .table-config-row label{font-size:13px;color:var(--text-dim);width:70px}
+  .table-config-row input{flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 10px;font-size:14px;font-family:'DM Sans',sans-serif;outline:none}
+  .table-config-row input:focus{border-color:var(--accent)}
+  .table-config-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:20px}
 </style>
 </head>
 <body>
@@ -149,6 +172,16 @@
     <button class="btn btn-icon" id="tool-circle" onclick="setTool('circle')" data-tip="Circle (C)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg></button>
     <button class="btn btn-icon" id="tool-line" onclick="setTool('line')" data-tip="Line (L)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="19" x2="19" y2="5"/></svg></button>
     <button class="btn btn-icon" id="tool-arrow" onclick="setTool('arrow')" data-tip="Arrow (A)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="19" x2="19" y2="5"/><polyline points="12 5 19 5 19 12"/></svg></button>
+    <button class="btn btn-icon" id="tool-whiteblock" onclick="setTool('whiteblock')" data-tip="White Block (W)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="18" height="18" rx="2" fill="#fff" stroke="#888"/>
+      </svg>
+    </button>
+    <button class="btn btn-icon" id="tool-table" onclick="setTool('table')" data-tip="Table (B)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/>
+      </svg>
+    </button>
     <button class="btn btn-icon" id="tool-erase" onclick="setTool('erase')" data-tip="Eraser (E)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <rect x="5" y="3" width="14" height="10" rx="2" fill="none"/>
@@ -340,10 +373,11 @@ async function rotatePage(d){pageRotations[currentPage]=((pageRotations[currentP
 
 // ══════ Tools ══════
 function setTool(t){currentTool=t;if(t!=='select')clearSel();
+  if(t!=='table')commitAllTables();
   document.querySelectorAll('[id^="tool-"]').forEach(b=>b.classList.remove('active'));
   const btn=document.getElementById('tool-'+t);if(btn)btn.classList.add('active');
   document.getElementById('viewport').classList.toggle('hand-active',t==='hand');
-  const cur=t==='select'?'default':t==='text'?'text':t==='hand'?'inherit':t==='erase'?`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Crect x='4' y='2' width='16' height='12' rx='2' fill='%23e4e6ef' stroke='%236c8aff' stroke-width='2'/%3E%3Crect x='4' y='12' width='16' height='8' rx='2' fill='%236c8aff' stroke='%236c8aff' stroke-width='1'/%3E%3C/svg%3E") 12 20, crosshair`:'crosshair';
+  const cur=t==='select'?'default':t==='text'?'text':t==='hand'?'inherit':t==='table'?'crosshair':t==='erase'?`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Crect x='4' y='2' width='16' height='12' rx='2' fill='%23e4e6ef' stroke='%236c8aff' stroke-width='2'/%3E%3Crect x='4' y='12' width='16' height='8' rx='2' fill='%236c8aff' stroke='%236c8aff' stroke-width='1'/%3E%3C/svg%3E") 12 20, crosshair`:'crosshair';
   pageElements.forEach(e=>{
     e.annCanvas.style.cursor=cur;
     if(t==='select'){
@@ -378,6 +412,8 @@ function toggleSidebar(){document.getElementById('sidebar').classList.toggle('hi
 
 // ══════ Shape Bounds ══════
 function getAnnBounds(a, ctx){
+  if(a.type==='whiteblock'){const x=Math.min(a.x,a.x+a.w),y=Math.min(a.y,a.y+a.h);return{x,y,w:Math.abs(a.w),h:Math.abs(a.h)};}
+  if(a.type==='table')return{x:a.x,y:a.y,w:a.colWidths.reduce((s,v)=>s+v,0),h:a.rowHeights.reduce((s,v)=>s+v,0)};
   if(a.type==='rect'){const x=Math.min(a.x,a.x+a.w),y=Math.min(a.y,a.y+a.h);return{x,y,w:Math.abs(a.w),h:Math.abs(a.h)};}
   if(a.type==='circle')return{x:a.cx-Math.abs(a.rx),y:a.cy-Math.abs(a.ry),w:Math.abs(a.rx)*2,h:Math.abs(a.ry)*2};
   if(a.type==='line'||a.type==='arrow'){const x=Math.min(a.x1,a.x2),y=Math.min(a.y1,a.y2);return{x,y,w:Math.abs(a.x2-a.x1)||1,h:Math.abs(a.y2-a.y1)||1};}
@@ -394,6 +430,7 @@ function findAnnAt(entry, x, y){
     if(a.type==='line'||a.type==='arrow'){if(distToSeg(x,y,a.x1,a.y1,a.x2,a.y2)<t)return i;}
     else if(a.type==='circle'){const dx=(x-a.cx)/Math.max(Math.abs(a.rx),1),dy=(y-a.cy)/Math.max(Math.abs(a.ry),1);if(Math.abs(Math.sqrt(dx*dx+dy*dy)-1)<.35)return i;}
     else if(a.type==='path'){if(a.points.some(p=>Math.abs(p.x-x)<t&&Math.abs(p.y-y)<t))return i;}
+    else if(a.type==='whiteblock'||a.type==='table'){if(x>=b.x-t&&x<=b.x+b.w+t&&y>=b.y-t&&y<=b.y+b.h+t)return i;}
     else{if(x>=b.x-t&&x<=b.x+b.w+t&&y>=b.y-t&&y<=b.y+b.h+t)return i;}
   }
   return -1;
@@ -418,6 +455,11 @@ function selectAnn(entry, idx){
     const eb=document.createElement('button');eb.className='act-edit';
     eb.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>Edit';
     eb.onclick=ev=>{ev.stopPropagation();editText(entry,idx)};actions.appendChild(eb);
+  }
+  if(a.type==='table'){
+    const eb=document.createElement('button');eb.className='act-edit';
+    eb.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>Edit';
+    eb.onclick=ev=>{ev.stopPropagation();editTableAnn(entry,idx)};actions.appendChild(eb);
   }
   const db=document.createElement('button');db.className='act-delete';
   db.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>Delete';
@@ -460,7 +502,8 @@ function onDrag(e){
   const sa=sel.startAnn;
 
   if(sel.dragType==='move'){
-    if(a.type==='rect'){a.x=sa.x+dx;a.y=sa.y+dy}
+    if(a.type==='rect'||a.type==='whiteblock'){a.x=sa.x+dx;a.y=sa.y+dy}
+    else if(a.type==='table'){a.x=sa.x+dx;a.y=sa.y+dy}
     else if(a.type==='circle'){a.cx=sa.cx+dx;a.cy=sa.cy+dy}
     else if(a.type==='line'||a.type==='arrow'){a.x1=sa.x1+dx;a.y1=sa.y1+dy;a.x2=sa.x2+dx;a.y2=sa.y2+dy}
     else if(a.type==='text'){a.x=sa.x+dx;a.y=sa.y+dy}
@@ -469,7 +512,7 @@ function onDrag(e){
     const h=sel.dragHandle;
     if(a.type==='line'||a.type==='arrow'){
       if(h==='p1'){a.x1=sa.x1+dx;a.y1=sa.y1+dy}else{a.x2=sa.x2+dx;a.y2=sa.y2+dy}
-    }else if(a.type==='rect'){
+    }else if(a.type==='rect'||a.type==='whiteblock'){
       let nx=sa.x,ny=sa.y,nw=sa.w,nh=sa.h;
       if(h.includes('e'))nw=sa.w+dx;if(h.includes('w')){nx=sa.x+dx;nw=sa.w-dx}
       if(h.includes('s'))nh=sa.h+dy;if(h.includes('n')){ny=sa.y+dy;nh=sa.h-dy}
@@ -479,6 +522,15 @@ function onDrag(e){
       if(h.includes('e'))nw+=dx;if(h.includes('w')){nx+=dx;nw-=dx}
       if(h.includes('s'))nh+=dy;if(h.includes('n')){ny+=dy;nh-=dy}
       a.rx=Math.abs(nw)/2;a.ry=Math.abs(nh)/2;a.cx=nx+nw/2;a.cy=ny+nh/2;
+    }else if(a.type==='table'){
+      const ob=getAnnBounds(sa);
+      let scaleX=1,scaleY=1;
+      if(h.includes('e'))scaleX=(ob.w+dx)/ob.w;
+      if(h.includes('w')){scaleX=(ob.w-dx)/ob.w;a.x=sa.x+dx}
+      if(h.includes('s'))scaleY=(ob.h+dy)/ob.h;
+      if(h.includes('n')){scaleY=(ob.h-dy)/ob.h;a.y=sa.y+dy}
+      if(scaleX!==1)for(let i=0;i<a.colWidths.length;i++)a.colWidths[i]=Math.max(30,sa.colWidths[i]*scaleX);
+      if(scaleY!==1)for(let i=0;i<a.rowHeights.length;i++)a.rowHeights[i]=Math.max(20,sa.rowHeights[i]*scaleY);
     }else if(a.type==='text'){
       const ob=getAnnBounds(sa,sel.entry.annCtx);let nh=ob.h;
       if(h.includes('s'))nh+=dy;if(h.includes('n'))nh-=dy;
@@ -514,8 +566,9 @@ function attachListeners(entry){
     if(!pdfDoc||currentTool==='hand'||currentTool==='select')return;
     const r=annCanvas.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;
     if(currentTool==='draw'||currentTool==='highlight'){isDrawing=true;annCanvas._dp=[{x,y}];e.stopPropagation()}
-    else if(['rect','circle','line','arrow'].includes(currentTool)){isDrawing=true;annCanvas._ss={x,y};e.stopPropagation()}
+    else if(['rect','circle','line','arrow','whiteblock'].includes(currentTool)){isDrawing=true;annCanvas._ss={x,y};e.stopPropagation()}
     else if(currentTool==='text'){createTextInput(entry,x,y);e.stopPropagation()}
+    else if(currentTool==='table'){showTableConfig(entry,x,y);e.stopPropagation()}
     else if(currentTool==='erase'){eraseAt(entry,x,y);e.stopPropagation()}
   });
 
@@ -528,6 +581,8 @@ function attachListeners(entry){
       ctx.save();ctx.strokeStyle=document.getElementById('colorPicker').value;ctx.lineWidth=parseInt(document.getElementById('brushSize').value);
       ctx.lineCap='round';ctx.lineJoin='round';ctx.globalAlpha=currentTool==='highlight'?.3:1;
       ctx.beginPath();annCanvas._dp.forEach((p,i)=>i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y));ctx.stroke();ctx.restore();
+    }else if(currentTool==='whiteblock'&&annCanvas._ss){
+      const s=annCanvas._ss;redrawAnns(entry);ctx.save();ctx.fillStyle='#ffffff';ctx.fillRect(s.x,s.y,x-s.x,y-s.y);ctx.strokeStyle='#cccccc';ctx.lineWidth=1;ctx.setLineDash([4,4]);ctx.strokeRect(s.x,s.y,x-s.x,y-s.y);ctx.restore();
     }else if(['rect','circle','line','arrow'].includes(currentTool)&&annCanvas._ss){
       const s=annCanvas._ss;redrawAnns(entry);ctx.save();ctx.strokeStyle=document.getElementById('colorPicker').value;ctx.lineWidth=parseInt(document.getElementById('brushSize').value);
       previewShape(ctx,currentTool,s.x,s.y,x,y);ctx.restore();
@@ -540,6 +595,11 @@ function attachListeners(entry){
     const color=document.getElementById('colorPicker').value,size=parseInt(document.getElementById('brushSize').value);
     if((currentTool==='draw'||currentTool==='highlight')&&annCanvas._dp){
       if(annCanvas._dp.length>1)getAnns(pageNum).push({type:'path',points:annCanvas._dp,color,size,alpha:currentTool==='highlight'?.3:1});annCanvas._dp=null;
+    }else if(currentTool==='whiteblock'&&annCanvas._ss){
+      const s=annCanvas._ss;
+      const w=x-s.x,h=y-s.y;
+      if(Math.abs(w)>5&&Math.abs(h)>5)getAnns(pageNum).push({type:'whiteblock',x:s.x,y:s.y,w,h});
+      annCanvas._ss=null;
     }else if(['rect','circle','line','arrow'].includes(currentTool)&&annCanvas._ss){
       const s=annCanvas._ss;
       if(currentTool==='rect')getAnns(pageNum).push({type:'rect',x:s.x,y:s.y,w:x-s.x,h:y-s.y,color,size,alpha:1});
@@ -575,7 +635,8 @@ function attachListeners(entry){
     if(currentTool!=='select')return;
     const r=annCanvas.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;
     const idx=findAnnAt(entry,x,y);
-    if(idx!==-1){const a=getAnns(pageNum)[idx];if(a&&a.type==='text'){e.stopPropagation();e.preventDefault();editText(entry,idx)}}
+    if(idx!==-1){const a=getAnns(pageNum)[idx];if(a&&a.type==='text'){e.stopPropagation();e.preventDefault();editText(entry,idx)}
+      else if(a&&a.type==='table'){e.stopPropagation();e.preventDefault();editTableAnn(entry,idx)}}
   });
 
   // Cursor hint: pointer over annotations, text-cursor elsewhere
@@ -598,6 +659,8 @@ function drawAnn(ctx,a){
   else if(a.type==='line'){ctx.strokeStyle=a.color;ctx.lineWidth=a.size;ctx.lineCap='round';ctx.globalAlpha=a.alpha||1;ctx.beginPath();ctx.moveTo(a.x1,a.y1);ctx.lineTo(a.x2,a.y2);ctx.stroke()}
   else if(a.type==='arrow'){ctx.strokeStyle=a.color;ctx.fillStyle=a.color;ctx.lineWidth=a.size;ctx.lineCap='round';ctx.globalAlpha=a.alpha||1;drawArrow(ctx,a.x1,a.y1,a.x2,a.y2,a.size)}
   else if(a.type==='text'){ctx.fillStyle=a.color;ctx.font=`${a.fontSize}px "DM Sans",sans-serif`;a.text.split('\n').forEach((l,i)=>ctx.fillText(l,a.x,a.y+i*a.fontSize*1.2))}
+  else if(a.type==='whiteblock'){ctx.fillStyle='#ffffff';ctx.fillRect(a.x,a.y,a.w,a.h)}
+  else if(a.type==='table'){drawTableAnn(ctx,a)}
   ctx.restore();
 }
 
@@ -633,6 +696,170 @@ function editText(entry,idx){
   entry._ati={el:inp,x:a.x,y:a.y-a.fontSize};inp.addEventListener('blur',()=>setTimeout(()=>commitText(entry),100));
 }
 
+// ══════ Table Drawing ══════
+function drawTableAnn(ctx,a){
+  const{x,y,rows,cols,cells,colWidths,rowHeights,borderColor,borderSize}=a;
+  ctx.fillStyle='#ffffff';
+  const tw=colWidths.reduce((s,v)=>s+v,0),th=rowHeights.reduce((s,v)=>s+v,0);
+  ctx.fillRect(x,y,tw,th);
+  ctx.strokeStyle=borderColor||'#000000';ctx.lineWidth=borderSize||1;
+  ctx.strokeRect(x,y,tw,th);
+  let cy=y;
+  for(let r=0;r<rows;r++){
+    let cx=x;
+    for(let c=0;c<cols;c++){
+      ctx.strokeRect(cx,cy,colWidths[c],rowHeights[r]);
+      const txt=cells[r]&&cells[r][c]?cells[r][c]:'';
+      if(txt){
+        ctx.fillStyle=a.textColor||'#000000';
+        ctx.font=`${a.fontSize||13}px "DM Sans",sans-serif`;
+        const lines=txt.split('\n');
+        const lh=(a.fontSize||13)*1.3;
+        for(let li=0;li<lines.length;li++){
+          ctx.fillText(lines[li],cx+4,cy+4+(a.fontSize||13)+li*lh,colWidths[c]-8);
+        }
+      }
+      cx+=colWidths[c];
+    }
+    cy+=rowHeights[r];
+  }
+}
+
+// ══════ Table Config & Editing ══════
+function showTableConfig(entry,x,y){
+  const modal=document.createElement('div');modal.className='table-config-modal';
+  modal.innerHTML=`<div class="table-config-box">
+    <h3>Insert Table</h3>
+    <div class="table-config-row"><label>Rows</label><input type="number" id="tblRows" value="3" min="1" max="50"></div>
+    <div class="table-config-row"><label>Columns</label><input type="number" id="tblCols" value="3" min="1" max="20"></div>
+    <div class="table-config-actions">
+      <button class="btn" id="tblCancel">Cancel</button>
+      <button class="btn btn-accent" id="tblInsert">Insert</button>
+    </div></div>`;
+  document.body.appendChild(modal);
+  setTimeout(()=>modal.querySelector('#tblRows').focus(),50);
+  modal.querySelector('#tblCancel').onclick=()=>modal.remove();
+  modal.querySelector('#tblInsert').onclick=()=>{
+    const rows=parseInt(modal.querySelector('#tblRows').value)||3;
+    const cols=parseInt(modal.querySelector('#tblCols').value)||3;
+    modal.remove();
+    createTableOverlay(entry,x,y,rows,cols);
+  };
+  modal.querySelector('#tblRows').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();modal.querySelector('#tblInsert').click()}});
+  modal.querySelector('#tblCols').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();modal.querySelector('#tblInsert').click()}});
+}
+
+function createTableOverlay(entry,x,y,rows,cols,existingAnn,existingIdx){
+  commitAllTables();
+  const colW=90,rowH=32;
+  const cells=existingAnn?existingAnn.cells:[];
+  for(let r=0;r<rows;r++){if(!cells[r])cells[r]=[];for(let c=0;c<cols;c++){if(cells[r][c]===undefined)cells[r][c]=''}}
+  const ov=document.createElement('div');ov.className='table-overlay';
+  ov.style.left=x+'px';ov.style.top=y+'px';
+  const colWidths=existingAnn?existingAnn.colWidths:Array(cols).fill(colW);
+  const rowHeights=existingAnn?existingAnn.rowHeights:Array(rows).fill(rowH);
+  ov.style.width=colWidths.reduce((s,v)=>s+v,0)+'px';
+
+  const toolbar=document.createElement('div');toolbar.className='table-toolbar';
+  toolbar.innerHTML=`<button class="tbl-act" onclick="tblAddRow(this)">+Row</button>
+    <button class="tbl-act" onclick="tblAddCol(this)">+Col</button>
+    <button class="tbl-act" onclick="tblDelRow(this)">-Row</button>
+    <button class="tbl-act" onclick="tblDelCol(this)">-Col</button>
+    <button class="tbl-done" onclick="commitTable(this)">Done</button>
+    <button class="tbl-del" onclick="cancelTable(this)">Delete</button>`;
+  ov.appendChild(toolbar);
+
+  const tbl=document.createElement('table');
+  for(let r=0;r<rows;r++){
+    const tr=document.createElement('tr');
+    for(let c=0;c<cols;c++){
+      const td=document.createElement('td');td.contentEditable=true;td.textContent=cells[r][c];
+      td.style.width=colWidths[c]+'px';td.style.height=rowHeights[r]+'px';
+      tr.appendChild(td);
+    }
+    tbl.appendChild(tr);
+  }
+  ov.appendChild(tbl);
+  entry.wrapper.appendChild(ov);
+  entry._activeTable={el:ov,x,y,existingIdx:existingIdx!==undefined?existingIdx:null};
+  tbl.querySelector('td').focus();
+}
+
+function getTableOverlayEntry(btnEl){
+  const ov=btnEl.closest('.table-overlay');
+  for(const e of pageElements){if(e._activeTable&&e._activeTable.el===ov)return e}
+  return null;
+}
+
+function tblAddRow(btn){
+  const entry=getTableOverlayEntry(btn);if(!entry)return;
+  const tbl=entry._activeTable.el.querySelector('table');
+  const cols=tbl.rows[0]?tbl.rows[0].cells.length:1;
+  const tr=document.createElement('tr');
+  for(let c=0;c<cols;c++){const td=document.createElement('td');td.contentEditable=true;td.style.width=tbl.rows[0].cells[c].style.width;td.style.height='32px';tr.appendChild(td)}
+  tbl.appendChild(tr);
+}
+function tblAddCol(btn){
+  const entry=getTableOverlayEntry(btn);if(!entry)return;
+  const tbl=entry._activeTable.el.querySelector('table');
+  for(const tr of tbl.rows){const td=document.createElement('td');td.contentEditable=true;td.style.width='90px';td.style.height=tr.cells[0]?.style.height||'32px';tr.appendChild(td)}
+  entry._activeTable.el.style.width=(parseInt(entry._activeTable.el.style.width)+90)+'px';
+}
+function tblDelRow(btn){
+  const entry=getTableOverlayEntry(btn);if(!entry)return;
+  const tbl=entry._activeTable.el.querySelector('table');
+  if(tbl.rows.length<=1)return;
+  tbl.deleteRow(tbl.rows.length-1);
+}
+function tblDelCol(btn){
+  const entry=getTableOverlayEntry(btn);if(!entry)return;
+  const tbl=entry._activeTable.el.querySelector('table');
+  if(!tbl.rows[0]||tbl.rows[0].cells.length<=1)return;
+  const cw=parseInt(tbl.rows[0].cells[tbl.rows[0].cells.length-1].style.width)||90;
+  for(const tr of tbl.rows)tr.deleteCell(tr.cells.length-1);
+  entry._activeTable.el.style.width=(parseInt(entry._activeTable.el.style.width)-cw)+'px';
+}
+
+function commitTable(btn){
+  const entry=getTableOverlayEntry(btn);if(!entry||!entry._activeTable)return;
+  const at=entry._activeTable;const tbl=at.el.querySelector('table');
+  const rows=tbl.rows.length,cols=tbl.rows[0]?tbl.rows[0].cells.length:0;
+  const cells=[],colWidths=[],rowHeights=[];
+  for(let r=0;r<rows;r++){
+    cells[r]=[];
+    rowHeights[r]=tbl.rows[r].cells[0]?tbl.rows[r].cells[0].offsetHeight:32;
+    for(let c=0;c<cols;c++){
+      cells[r][c]=tbl.rows[r].cells[c].innerText||'';
+      if(r===0)colWidths[c]=tbl.rows[r].cells[c].offsetWidth;
+    }
+  }
+  if(at.existingIdx!==null){getAnns(entry.pageNum).splice(at.existingIdx,1)}
+  getAnns(entry.pageNum).push({type:'table',x:at.x,y:at.y,rows,cols,cells,colWidths,rowHeights,borderColor:'#000000',borderSize:1,textColor:'#000000',fontSize:13});
+  at.el.remove();entry._activeTable=null;redrawAnns(entry);
+}
+
+function cancelTable(btn){
+  const entry=getTableOverlayEntry(btn);if(!entry||!entry._activeTable)return;
+  entry._activeTable.el.remove();entry._activeTable=null;
+}
+
+function commitAllTables(){pageElements.forEach(e=>{if(e._activeTable){
+  const at=e._activeTable;const tbl=at.el.querySelector('table');
+  const rows=tbl.rows.length,cols=tbl.rows[0]?tbl.rows[0].cells.length:0;
+  const cells=[],colWidths=[],rowHeights=[];
+  for(let r=0;r<rows;r++){cells[r]=[];rowHeights[r]=tbl.rows[r].cells[0]?tbl.rows[r].cells[0].offsetHeight:32;
+    for(let c=0;c<cols;c++){cells[r][c]=tbl.rows[r].cells[c].innerText||'';if(r===0)colWidths[c]=tbl.rows[r].cells[c].offsetWidth}}
+  if(at.existingIdx!==null)getAnns(e.pageNum).splice(at.existingIdx,1);
+  getAnns(e.pageNum).push({type:'table',x:at.x,y:at.y,rows,cols,cells,colWidths,rowHeights,borderColor:'#000000',borderSize:1,textColor:'#000000',fontSize:13});
+  at.el.remove();e._activeTable=null;redrawAnns(e);
+}})}
+
+function editTableAnn(entry,idx){
+  const a=getAnns(entry.pageNum)[idx];if(!a||a.type!=='table')return;
+  clearSel();redrawAnns(entry);
+  createTableOverlay(entry,a.x,a.y,a.rows,a.cols,a,idx);
+}
+
 // ══════ Erase ══════
 function eraseAt(entry,x,y){
   const anns=getAnns(entry.pageNum);const t=15;
@@ -642,6 +869,8 @@ function eraseAt(entry,x,y){
     else if(a.type==='circle'){const dx=(x-a.cx)/Math.max(Math.abs(a.rx),1),dy=(y-a.cy)/Math.max(Math.abs(a.ry),1);hit=Math.abs(Math.sqrt(dx*dx+dy*dy)-1)<.35}
     else if(a.type==='line'||a.type==='arrow')hit=distToSeg(x,y,a.x1,a.y1,a.x2,a.y2)<t;
     else if(a.type==='text')hit=Math.abs(a.x-x)<60&&Math.abs(a.y-y)<a.fontSize+5;
+    else if(a.type==='whiteblock'){const b=getAnnBounds(a);hit=x>=b.x-t&&x<=b.x+b.w+t&&y>=b.y-t&&y<=b.y+b.h+t}
+    else if(a.type==='table'){const b=getAnnBounds(a);hit=x>=b.x-t&&x<=b.x+b.w+t&&y>=b.y-t&&y<=b.y+b.h+t}
     if(hit){anns.splice(i,1);redrawAnns(entry);return}}
 }
 function undoLast(){const anns=getAnns(currentPage);if(anns.length){anns.pop();clearSel();redrawAnns(pageElements[currentPage-1])}}
@@ -735,6 +964,19 @@ async function savePdf(){
         pg.drawLine({start:{x:tx,y:ty},end:{x:tx-hl*Math.cos(ang-Math.PI/6),y:ty-hl*Math.sin(ang-Math.PI/6)},thickness:a.size*sx,color:rgb(c.r,c.g,c.b),opacity:a.alpha||1});
         pg.drawLine({start:{x:tx,y:ty},end:{x:tx-hl*Math.cos(ang+Math.PI/6),y:ty-hl*Math.sin(ang+Math.PI/6)},thickness:a.size*sx,color:rgb(c.r,c.g,c.b),opacity:a.alpha||1})}
       else if(a.type==='text'){const c=hexRgb(a.color);const font=await doc.embedFont(PDFLib.StandardFonts.Helvetica);a.text.split('\n').forEach((l,i)=>pg.drawText(l,{x:a.x*sx,y:eH-(a.y+i*a.fontSize*1.2)*sy,size:a.fontSize*sy,font,color:rgb(c.r,c.g,c.b)}))}
+      else if(a.type==='whiteblock'){pg.drawRectangle({x:a.x*sx,y:eH-(a.y+a.h)*sy,width:a.w*sx,height:a.h*sy,color:rgb(1,1,1),borderWidth:0})}
+      else if(a.type==='table'){
+        const font=await doc.embedFont(PDFLib.StandardFonts.Helvetica);
+        const tw=a.colWidths.reduce((s,v)=>s+v,0),th=a.rowHeights.reduce((s,v)=>s+v,0);
+        pg.drawRectangle({x:a.x*sx,y:eH-(a.y+th)*sy,width:tw*sx,height:th*sy,color:rgb(1,1,1),borderColor:rgb(0,0,0),borderWidth:1*sx});
+        let cy=a.y;
+        for(let r=0;r<a.rows;r++){let cx=a.x;
+          for(let c=0;c<a.cols;c++){
+            pg.drawRectangle({x:cx*sx,y:eH-(cy+a.rowHeights[r])*sy,width:a.colWidths[c]*sx,height:a.rowHeights[r]*sy,borderColor:rgb(0,0,0),borderWidth:1*sx});
+            const txt=a.cells[r]&&a.cells[r][c]?a.cells[r][c]:'';
+            if(txt){const fs=(a.fontSize||13)*sy;txt.split('\n').forEach((l,li)=>pg.drawText(l,{x:(cx+4)*sx,y:eH-(cy+4+(a.fontSize||13)+li*(a.fontSize||13)*1.3)*sy,size:fs,font,color:rgb(0,0,0),maxWidth:(a.colWidths[c]-8)*sx}))}
+            cx+=a.colWidths[c];}cy+=a.rowHeights[r];}
+      }
     }
   }
   const saved=await doc.save();const url=URL.createObjectURL(new Blob([saved],{type:'application/pdf'}));
@@ -874,6 +1116,7 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Home'){e.preventDefault();scrollToPage(1)} if(e.key==='End'){e.preventDefault();scrollToPage(totalPages)}
   if(e.key==='h')setTool('hand');if(e.key==='v')setTool('select');if(e.key==='t')setTool('text');if(e.key==='d')setTool('draw');
   if(e.key==='r')setTool('rect');if(e.key==='e')setTool('erase');if(e.key==='c')setTool('circle');if(e.key==='l')setTool('line');if(e.key==='a')setTool('arrow');
+  if(e.key==='w')setTool('whiteblock');if(e.key==='b')setTool('table');
 });
 document.addEventListener('keyup',e=>{if(e.code==='Space'&&prevToolBeforeSpace!==null){setTool(prevToolBeforeSpace);prevToolBeforeSpace=null}});
 </script>
