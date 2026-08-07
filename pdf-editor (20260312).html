@@ -402,7 +402,37 @@ function updateZoom(){
     if(document.getElementById('searchInput').value.trim())doSearch();
   },80);
 }
-async function rotatePage(d){pageRotations[currentPage]=((pageRotations[currentPage]||0)+d+360)%360;await renderPageCanvas(pageElements[currentPage-1]);renderThumbnails()}
+async function rotatePage(d){
+  const entry=pageElements[currentPage-1];
+  commitAllText();commitAllTables();
+  const W=entry.pdfCanvas.width,H=entry.pdfCanvas.height;
+  if(W&&H)transformAnnsForRotation(currentPage,d,W,H);
+  pageRotations[currentPage]=((pageRotations[currentPage]||0)+d+360)%360;
+  await renderPageCanvas(entry);renderThumbnails();
+}
+// Rotate every annotation on a page by ±90° so it stays fixed to the page
+// content. W,H are the page canvas pixel dimensions BEFORE the rotation.
+// dir>0 is clockwise (Rotate Right), dir<0 counter-clockwise (Rotate Left).
+function transformAnnsForRotation(pageNum,dir,W,H){
+  const rp=p=>dir>0?{x:H-p.y,y:p.x}:{x:p.y,y:W-p.x};
+  for(const a of getAnns(pageNum)){
+    if(a.type==='path'){a.points=a.points.map(rp)}
+    else if(a.type==='line'||a.type==='arrow'){const p1=rp({x:a.x1,y:a.y1}),p2=rp({x:a.x2,y:a.y2});a.x1=p1.x;a.y1=p1.y;a.x2=p2.x;a.y2=p2.y}
+    else if(a.type==='rect'||a.type==='whiteblock'){const p1=rp({x:a.x,y:a.y}),p2=rp({x:a.x+a.w,y:a.y+a.h});a.x=Math.min(p1.x,p2.x);a.y=Math.min(p1.y,p2.y);a.w=Math.abs(p2.x-p1.x);a.h=Math.abs(p2.y-p1.y)}
+    else if(a.type==='circle'){const c=rp({x:a.cx,y:a.cy});a.cx=c.x;a.cy=c.y;const t=a.rx;a.rx=a.ry;a.ry=t}
+    else if(a.type==='text'){const p=rp({x:a.x,y:a.y});a.x=p.x;a.y=p.y}
+    else if(a.type==='table'){
+      const th=a.rowHeights.reduce((s,v)=>s+v,0),tw=a.colWidths.reduce((s,v)=>s+v,0);
+      const p1=rp({x:a.x,y:a.y}),p2=rp({x:a.x+tw,y:a.y+th});
+      a.x=Math.min(p1.x,p2.x);a.y=Math.min(p1.y,p2.y);
+      const R=a.rows,C=a.cols,nc=[],ncw=[],nrh=[];
+      for(let i=0;i<C;i++){nc[i]=[];for(let j=0;j<R;j++)nc[i][j]=dir>0?a.cells[R-1-j][i]:a.cells[j][C-1-i]}
+      for(let j=0;j<R;j++)ncw[j]=dir>0?a.rowHeights[R-1-j]:a.rowHeights[j];
+      for(let i=0;i<C;i++)nrh[i]=dir>0?a.colWidths[i]:a.colWidths[C-1-i];
+      a.rows=C;a.cols=R;a.cells=nc;a.colWidths=ncw;a.rowHeights=nrh;
+    }
+  }
+}
 
 // ══════ Tools ══════
 function setTool(t){currentTool=t;if(t!=='select')clearSel();
@@ -983,7 +1013,10 @@ function commitTable(btn){
 
 function cancelTable(btn){
   const entry=getTableOverlayEntry(btn);if(!entry||!entry._activeTable)return;
-  entry._activeTable.el.remove();entry._activeTable=null;
+  const at=entry._activeTable;
+  // When editing an existing table, Delete removes the original annotation too.
+  if(at.existingIdx!==null){getAnns(entry.pageNum).splice(at.existingIdx,1)}
+  at.el.remove();entry._activeTable=null;redrawAnns(entry);
 }
 
 function commitAllTables(){pageElements.forEach(e=>{if(e._activeTable){
