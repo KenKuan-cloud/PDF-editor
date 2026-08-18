@@ -1299,13 +1299,37 @@ function prettyFont(raw){const m=/^[A-Z]{6}\+(.+)$/.exec(raw||'');return m?m[1]:
 function isSubset(raw){return /^[A-Z]{6}\+/.test(raw||'')}
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 
+// ── GBK / GB2312 (CP936) repair ──
+// Chinese PDFs whose text/name is GB-encoded but read through a Western code
+// page show up as mojibake (e.g. "±ä¸ü¼ÇÂ¼"). Reconstruct the original bytes
+// and decode them as GB18030 (a superset of GBK/GB2312/CP936) to recover the
+// real characters (→ "变更记录"). Returns null when the input isn't mojibake.
+const _cp1252rev={8364:128,8218:130,402:131,8222:132,8230:133,8224:134,8225:135,710:136,8240:137,352:138,8249:139,338:140,381:142,8216:145,8217:146,8220:147,8221:148,8226:149,8211:150,8212:151,732:152,8482:153,353:154,8250:155,339:156,382:158,376:159};
+function _toByte(cp){if(cp<=0xFF)return cp;const b=_cp1252rev[cp];return b===undefined?null:b}
+let _gbkDecoder=null;
+function decodeGbk(str){
+  if(!str)return null;
+  try{if(!_gbkDecoder)_gbkDecoder=new TextDecoder('gb18030',{fatal:false})}catch(_){return null}
+  const bytes=[];
+  for(const ch of str){const b=_toByte(ch.codePointAt(0));if(b===null)return null;bytes.push(b)}
+  return _gbkDecoder.decode(new Uint8Array(bytes));
+}
+function hasCJK(s){return /[㐀-鿿豈-﫿]/.test(s||'')}
+function fixGbk(str){
+  if(!str||hasCJK(str))return null;            // already readable / not Chinese
+  const d=decodeGbk(str);
+  if(d&&hasCJK(d)&&!/�/.test(d))return d; // decoded to clean Chinese
+  return null;
+}
+
 let _fontTip=null;
 function showFontInfo(ev,raw,pt,sample){
   hideFontInfo();
   const tip=document.createElement('div');tip.className='font-tip';
-  const fam=prettyFont(raw);
-  tip.innerHTML=`<div class="ft-fam">${escapeHtml(fam)}</div>
+  const fam=prettyFont(raw);const famFixed=fixGbk(fam);const sampleFixed=fixGbk(sample);
+  tip.innerHTML=`<div class="ft-fam">${escapeHtml(famFixed||fam)}${famFixed?` <span style="font-size:10px;color:var(--text-dim)">(${escapeHtml(fam)})</span>`:''}</div>
     <div class="ft-meta">~${pt||'?'} pt${isSubset(raw)?' · embedded subset':''}</div>
+    ${sampleFixed?`<div class="ft-meta" style="color:var(--green)">GBK text: ${escapeHtml(sampleFixed)}</div>`:''}
     <div class="ft-raw">${escapeHtml(raw)}</div>`;
   document.body.appendChild(tip);
   const x=Math.min(ev.clientX+14,window.innerWidth-tip.offsetWidth-8);
@@ -1348,11 +1372,12 @@ function showAllFonts(){
     const body=overlay.querySelector('#fontListBody');if(!body)return;
     if(!fonts.size){body.textContent='No text fonts found — this PDF may be scanned images (no selectable text).';return}
     const arr=[...fonts.entries()].sort((a,b)=>b[1].count-a[1].count);
-    body.innerHTML=`<div style="margin-bottom:10px">${arr.length} font${arr.length!==1?'s':''} used:</div><div class="font-list">`+
-      arr.map(([fam,rec])=>`<div class="font-row">
-        <div class="font-sample">${escapeHtml(fam)}</div>
+    const anyFixed=arr.some(([fam])=>fixGbk(fam));
+    body.innerHTML=`<div style="margin-bottom:10px">${arr.length} font${arr.length!==1?'s':''} used${anyFixed?' <span style="color:var(--green)">· garbled names repaired via GBK</span>':''}:</div><div class="font-list">`+
+      arr.map(([fam,rec])=>{const fixed=fixGbk(fam);return `<div class="font-row">
+        <div class="font-sample">${escapeHtml(fixed||fam)}${fixed?` <span style="font-size:11px;color:var(--text-dim)">raw: ${escapeHtml(fam)}</span>`:''}</div>
         <div class="font-info">${rec.subset?'<span class="fi-badge">embedded subset</span> · ':''}${rec.count.toLocaleString()} chars</div>
-      </div>`).join('')+'</div>';
+      </div>`}).join('')+'</div>';
   }).catch(err=>{const body=overlay.querySelector('#fontListBody');if(body)body.textContent='Error scanning fonts: '+err.message});
 }
 
