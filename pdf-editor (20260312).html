@@ -118,6 +118,10 @@
   .text-layer span{position:absolute;white-space:pre;color:transparent;transform-origin:0% 0%;cursor:text;user-select:text}
   .text-layer span::selection{background:rgba(108,138,255,.4)}
 
+  /* Corrected CJK text overlay (masks garbled glyphs beneath) */
+  .text-layer span.cjk-fixed{color:#000;background:#fff;overflow:hidden}
+  .text-layer.cjk-hidden span.cjk-fixed{color:transparent;background:transparent;overflow:visible}
+
   /* Search highlights */
   .search-hl{position:absolute;background:rgba(255,217,107,.35);border-radius:2px;pointer-events:none;z-index:5}
   .search-hl.active{background:rgba(255,140,0,.55);box-shadow:0 0 0 2px rgba(255,140,0,.7)}
@@ -244,6 +248,7 @@
     <button class="btn btn-icon" onclick="undoLast()" data-tip="Undo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg></button>
     <button class="btn btn-icon" onclick="clearAnnotations()" data-tip="Clear Page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
     <button class="btn btn-icon" onclick="showAllFonts()" data-tip="List all fonts used"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg></button>
+    <button class="btn btn-icon active" id="btnCjk" onclick="toggleCjkOverlay()" data-tip="Show corrected Chinese over garbled (GBK) text"><svg viewBox="0 0 24 24" fill="none" stroke="none"><text x="12" y="18" font-size="18" text-anchor="middle" fill="currentColor" font-family="sans-serif">文</text></svg></button>
   </div>
   <div class="search-bar" id="searchBar">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;flex-shrink:0;color:var(--text-dim)"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -302,6 +307,9 @@ pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/p
 // CJK support: these let pdf.js decode/render Adobe CID fonts (Chinese, etc.)
 const CMAP_URL='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/';
 const STANDARD_FONT_URL='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/standard_fonts/';
+// System CJK fonts used to paint recovered Chinese over garbled glyphs.
+const CJK_FONT_STACK='"Noto Sans SC","Noto Sans CJK SC","Microsoft YaHei","PingFang SC","Hiragino Sans GB","Heiti SC",SimSun,"WenQuanYi Zen Hei",sans-serif';
+let cjkOverlayOn=true;
 
 let pdfDoc=null,pdfBytes=null,currentPage=1,totalPages=0,scale=1.5;
 let currentPdfPassword=null,isPasswordProtected=false,_pwLoadingTask=null,_pwCallback=null;
@@ -382,20 +390,29 @@ async function renderPageCanvas(e){
 }
 async function renderTextLayer(e, pg, vp){
   e.textLayer.innerHTML='';
+  e.textLayer.classList.toggle('cjk-hidden',!cjkOverlayOn);
   const tc=await pg.getTextContent();
   for(const item of tc.items){
     if(!item.str)continue;
     const tx=pdfjsLib.Util.transform(vp.transform,item.transform);
     const span=document.createElement('span');
     // Recover GBK/GB2312 text that came through as mojibake so selection,
-    // copy, and search see the real Chinese. No-op for normal text.
+    // copy, search — and the visible overlay — show the real Chinese.
     const fixed=fixGbk(item.str);
-    if(fixed){span.textContent=fixed;span.dataset.raw=item.str;}
+    if(fixed){span.textContent=fixed;span.dataset.raw=item.str;span.classList.add('cjk-fixed');}
     else span.textContent=item.str;
     const fs=Math.hypot(tx[0],tx[1]);
     const angle=Math.atan2(tx[1],tx[0]);
     span.style.left=tx[4]+'px';span.style.top=(tx[5]-fs)+'px';
-    span.style.fontSize=fs+'px';span.style.fontFamily=item.fontName||'sans-serif';
+    span.style.fontSize=fs+'px';
+    span.style.fontFamily=fixed?CJK_FONT_STACK:(item.fontName||'sans-serif');
+    if(fixed){
+      // Size the mask to the original glyph run so it fully covers the garbled
+      // text beneath, and vertically center the recovered characters in it.
+      const wpx=(item.width||0)*scale;
+      if(wpx>0)span.style.width=wpx+'px';
+      span.style.height=(fs*1.2)+'px';span.style.lineHeight=(fs*1.2)+'px';
+    }
     if(Math.abs(angle)>0.01)span.style.transform=`rotate(${-angle}rad)`;
     // Store page info for search
     span.dataset.page=e.pageNum;
@@ -501,6 +518,11 @@ function setTool(t){currentTool=t;if(t!=='select')clearSel();
   });
 }
 function toggleSidebar(){document.getElementById('sidebar').classList.toggle('hidden')}
+function toggleCjkOverlay(){
+  cjkOverlayOn=!cjkOverlayOn;
+  pageElements.forEach(e=>e.textLayer.classList.toggle('cjk-hidden',!cjkOverlayOn));
+  const b=document.getElementById('btnCjk');if(b)b.classList.toggle('active',cjkOverlayOn);
+}
 
 // ══════ Hand Tool ══════
 (function(){const vp=document.getElementById('viewport');
