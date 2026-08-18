@@ -299,6 +299,9 @@
 
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+// CJK support: these let pdf.js decode/render Adobe CID fonts (Chinese, etc.)
+const CMAP_URL='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/';
+const STANDARD_FONT_URL='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/standard_fonts/';
 
 let pdfDoc=null,pdfBytes=null,currentPage=1,totalPages=0,scale=1.5;
 let currentPdfPassword=null,isPasswordProtected=false,_pwLoadingTask=null,_pwCallback=null;
@@ -318,7 +321,7 @@ document.getElementById('fileInput').addEventListener('change',e=>{if(e.target.f
 async function handleFile(f){if(!f||f.type!=='application/pdf')return;fileName=f.name;document.getElementById('fileName').textContent=fileName;pdfBytes=new Uint8Array(await f.arrayBuffer());annotations={};pageRotations={};currentPdfPassword=null;isPasswordProtected=false;await reloadFromBytes()}
 async function reloadFromBytes(){
   _fontNameCache.clear();
-  const lt=pdfjsLib.getDocument({data:pdfBytes.slice()});_pwLoadingTask=lt;
+  const lt=pdfjsLib.getDocument({data:pdfBytes.slice(),cMapUrl:CMAP_URL,cMapPacked:true,standardFontDataUrl:STANDARD_FONT_URL});_pwLoadingTask=lt;
   lt.onPassword=(cb,reason)=>{
     isPasswordProtected=true;
     const msg=reason===pdfjsLib.PasswordResponses.INCORRECT_PASSWORD?'Incorrect password. Please try again.':'This PDF is password protected. Enter the password to open it.';
@@ -384,7 +387,11 @@ async function renderTextLayer(e, pg, vp){
     if(!item.str)continue;
     const tx=pdfjsLib.Util.transform(vp.transform,item.transform);
     const span=document.createElement('span');
-    span.textContent=item.str;
+    // Recover GBK/GB2312 text that came through as mojibake so selection,
+    // copy, and search see the real Chinese. No-op for normal text.
+    const fixed=fixGbk(item.str);
+    if(fixed){span.textContent=fixed;span.dataset.raw=item.str;}
+    else span.textContent=item.str;
     const fs=Math.hypot(tx[0],tx[1]);
     const angle=Math.atan2(tx[1],tx[0]);
     span.style.left=tx[4]+'px';span.style.top=(tx[5]-fs)+'px';
