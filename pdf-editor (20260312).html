@@ -151,6 +151,18 @@
   .table-config-row input{flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 10px;font-size:14px;font-family:'DM Sans',sans-serif;outline:none}
   .table-config-row input:focus{border-color:var(--accent)}
   .table-config-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:20px}
+
+  /* ── Font Inspector ── */
+  .text-layer.font-mode span{cursor:help}
+  .font-tip{position:fixed;z-index:700;background:var(--surface);border:1px solid var(--accent);border-radius:8px;padding:8px 10px;box-shadow:0 8px 24px rgba(0,0,0,.5);pointer-events:none;max-width:280px}
+  .font-tip .ft-fam{font-size:13px;font-weight:600;color:var(--text)}
+  .font-tip .ft-meta{font-size:11px;color:var(--accent);margin-top:2px}
+  .font-tip .ft-raw{font-size:10px;color:var(--text-dim);font-family:'JetBrains Mono',monospace;margin-top:4px;word-break:break-all}
+  .font-list{display:flex;flex-direction:column;gap:6px}
+  .font-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2)}
+  .font-sample{font-size:14px;font-weight:600;color:var(--text)}
+  .font-info{font-size:11px;color:var(--text-dim);font-family:'JetBrains Mono',monospace;white-space:nowrap}
+  .font-info .fi-badge{color:var(--accent)}
 </style>
 </head>
 <body>
@@ -197,6 +209,12 @@
         <line x1="3" y1="21" x2="21" y2="21"/>
       </svg>
     </button>
+    <button class="btn btn-icon" id="tool-font" onclick="setTool('font')" data-tip="Font Inspector (F) — click text to see its font">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 20 L9 6 L14 20"/><line x1="5.6" y1="15" x2="12.4" y2="15"/>
+        <path d="M16.5 20 A2.5 2.5 0 1 1 21 18.5 L21 20" fill="none"/><line x1="21" y1="14.5" x2="21" y2="18.5"/>
+      </svg>
+    </button>
   </div>
   <div class="toolbar-group">
     <label>Color</label><input type="color" id="colorPicker" value="#ff0000">
@@ -213,6 +231,7 @@
     <button class="btn btn-icon" onclick="rotatePage(90)" data-tip="Rotate Right"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
     <button class="btn btn-icon" onclick="undoLast()" data-tip="Undo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg></button>
     <button class="btn btn-icon" onclick="clearAnnotations()" data-tip="Clear Page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
+    <button class="btn btn-icon" onclick="showAllFonts()" data-tip="List all fonts used"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg></button>
   </div>
   <div class="search-bar" id="searchBar">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;flex-shrink:0;color:var(--text-dim)"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -284,6 +303,7 @@ function openFile(){document.getElementById('fileInput').click()}
 document.getElementById('fileInput').addEventListener('change',e=>{if(e.target.files[0])handleFile(e.target.files[0]);e.target.value=''});
 async function handleFile(f){if(!f||f.type!=='application/pdf')return;fileName=f.name;document.getElementById('fileName').textContent=fileName;pdfBytes=new Uint8Array(await f.arrayBuffer());annotations={};pageRotations={};currentPdfPassword=null;isPasswordProtected=false;await reloadFromBytes()}
 async function reloadFromBytes(){
+  _fontNameCache.clear();
   const lt=pdfjsLib.getDocument({data:pdfBytes.slice()});_pwLoadingTask=lt;
   lt.onPassword=(cb,reason)=>{
     isPasswordProtected=true;
@@ -358,6 +378,8 @@ async function renderTextLayer(e, pg, vp){
     if(Math.abs(angle)>0.01)span.style.transform=`rotate(${-angle}rad)`;
     // Store page info for search
     span.dataset.page=e.pageNum;
+    // Store resolved font name + approx point size for the Font Inspector
+    if(item.fontName){span.dataset.font=resolveFontName(pg,item.fontName);span.dataset.pt=Math.max(1,Math.round(fs/scale))}
     e.textLayer.appendChild(span);
   }
 }
@@ -366,6 +388,7 @@ async function rerenderAll(){const gen=++_renderGen;for(const e of pageElements)
 
 // ══════ Scroll ══════
 function setupScrollTracking(){document.getElementById('viewport').onscroll=()=>{
+  hideFontInfo();
   const r=document.getElementById('viewport').getBoundingClientRect(),mid=r.top+r.height/2;
   let cl=1,best=Infinity;for(const e of pageElements){const rr=e.wrapper.getBoundingClientRect();const d=Math.abs(rr.top+rr.height/2-mid);if(d<best){best=d;cl=e.pageNum;}}
   if(cl!==currentPage){currentPage=cl;updatePageUI();}
@@ -437,15 +460,17 @@ function transformAnnsForRotation(pageNum,dir,W,H){
 // ══════ Tools ══════
 function setTool(t){currentTool=t;if(t!=='select')clearSel();
   if(t!=='table')commitAllTables();
+  hideFontInfo();
   document.querySelectorAll('[id^="tool-"]').forEach(b=>b.classList.remove('active'));
   const btn=document.getElementById('tool-'+t);if(btn)btn.classList.add('active');
   document.getElementById('viewport').classList.toggle('hand-active',t==='hand');
-  const cur=t==='select'?'default':t==='text'?'text':t==='hand'?'inherit':t==='table'?'crosshair':t==='erase'?`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Crect x='4' y='2' width='16' height='12' rx='2' fill='%23e4e6ef' stroke='%236c8aff' stroke-width='2'/%3E%3Crect x='4' y='12' width='16' height='8' rx='2' fill='%236c8aff' stroke='%236c8aff' stroke-width='1'/%3E%3C/svg%3E") 12 20, crosshair`:'crosshair';
+  const cur=t==='select'?'default':t==='text'?'text':t==='hand'?'inherit':t==='table'?'crosshair':t==='font'?'help':t==='erase'?`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Crect x='4' y='2' width='16' height='12' rx='2' fill='%23e4e6ef' stroke='%236c8aff' stroke-width='2'/%3E%3Crect x='4' y='12' width='16' height='8' rx='2' fill='%236c8aff' stroke='%236c8aff' stroke-width='1'/%3E%3C/svg%3E") 12 20, crosshair`:'crosshair';
   pageElements.forEach(e=>{
     e.annCanvas.style.cursor=cur;
-    if(t==='select'){
-      // In select mode: annotation canvas OFF, text layer ON
-      // Text layer handles both annotation clicks and native text selection
+    e.textLayer.classList.toggle('font-mode',t==='font');
+    if(t==='select'||t==='font'){
+      // Text layer receives clicks (annotation selection or font inspection);
+      // annotation canvas is disabled so events reach the text spans.
       e.annCanvas.style.pointerEvents='none';
       e.textLayer.classList.add('interactive');
     }else{
@@ -711,6 +736,14 @@ function attachListeners(entry){
     if(currentTool!=='select')return;
     const r=annCanvas.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;
     entry.textLayer.style.cursor=findAnnAt(entry,x,y)!==-1?'pointer':'text';
+  });
+
+  // Font Inspector: click a word to reveal its font
+  entry.textLayer.addEventListener('click',e=>{
+    if(currentTool!=='font')return;
+    const sp=e.target.closest('span');
+    if(sp&&sp.dataset.font){e.stopPropagation();showFontInfo(e,sp.dataset.font,sp.dataset.pt,sp.textContent)}
+    else hideFontInfo();
   });
 }
 
@@ -1163,6 +1196,77 @@ async function savePdf(){
 }
 function hexRgb(h){return{r:parseInt(h.slice(1,3),16)/255,g:parseInt(h.slice(3,5),16)/255,b:parseInt(h.slice(5,7),16)/255}}
 
+// ══════ Font Inspection ══════
+const _fontNameCache=new Map(); // internal font id -> real font name
+function resolveFontName(pg,internalId){
+  if(_fontNameCache.has(internalId))return _fontNameCache.get(internalId);
+  let name=internalId;
+  try{if(pg.commonObjs.has(internalId)){const f=pg.commonObjs.get(internalId);if(f&&f.name)name=f.name}}catch(_){}
+  _fontNameCache.set(internalId,name);
+  return name;
+}
+// Embedded subsets are prefixed like "ABCDEE+" — strip it for the family name.
+function prettyFont(raw){const m=/^[A-Z]{6}\+(.+)$/.exec(raw||'');return m?m[1]:(raw||'Unknown')}
+function isSubset(raw){return /^[A-Z]{6}\+/.test(raw||'')}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+
+let _fontTip=null;
+function showFontInfo(ev,raw,pt,sample){
+  hideFontInfo();
+  const tip=document.createElement('div');tip.className='font-tip';
+  const fam=prettyFont(raw);
+  tip.innerHTML=`<div class="ft-fam">${escapeHtml(fam)}</div>
+    <div class="ft-meta">~${pt||'?'} pt${isSubset(raw)?' · embedded subset':''}</div>
+    <div class="ft-raw">${escapeHtml(raw)}</div>`;
+  document.body.appendChild(tip);
+  const x=Math.min(ev.clientX+14,window.innerWidth-tip.offsetWidth-8);
+  const y=Math.min(ev.clientY+14,window.innerHeight-tip.offsetHeight-8);
+  tip.style.left=Math.max(8,x)+'px';tip.style.top=Math.max(8,y)+'px';
+  _fontTip=tip;
+}
+function hideFontInfo(){if(_fontTip){_fontTip.remove();_fontTip=null}}
+
+async function scanFonts(){
+  const fonts=new Map(); // family -> {count, subset, raws:Set}
+  for(let pn=1;pn<=totalPages;pn++){
+    const pg=await pdfDoc.getPage(pn);
+    const tc=await pg.getTextContent();
+    for(const it of tc.items){
+      if(!it.str||!it.fontName)continue;
+      const raw=resolveFontName(pg,it.fontName);
+      const fam=prettyFont(raw);
+      let rec=fonts.get(fam);
+      if(!rec){rec={count:0,subset:isSubset(raw),raws:new Set()};fonts.set(fam,rec)}
+      rec.count+=it.str.length;rec.raws.add(raw);
+    }
+  }
+  return fonts;
+}
+function showAllFonts(){
+  if(!pdfDoc)return;
+  const overlay=document.createElement('div');overlay.className='modal-overlay';
+  overlay.innerHTML=`<div class="modal" style="width:520px;max-width:92vw">
+    <div class="modal-header"><h3>Fonts in Document</h3><button class="btn-close">&times;</button></div>
+    <div class="modal-body"><div id="fontListBody" style="font-size:13px;color:var(--text-dim)">Scanning all pages…</div></div>
+    <div class="modal-footer"><button class="btn" id="fontListClose">Close</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const close=()=>overlay.remove();
+  overlay.querySelector('.btn-close').onclick=close;
+  overlay.querySelector('#fontListClose').onclick=close;
+  overlay.addEventListener('mousedown',e=>{if(e.target===overlay)close()});
+  scanFonts().then(fonts=>{
+    const body=overlay.querySelector('#fontListBody');if(!body)return;
+    if(!fonts.size){body.textContent='No text fonts found — this PDF may be scanned images (no selectable text).';return}
+    const arr=[...fonts.entries()].sort((a,b)=>b[1].count-a[1].count);
+    body.innerHTML=`<div style="margin-bottom:10px">${arr.length} font${arr.length!==1?'s':''} used:</div><div class="font-list">`+
+      arr.map(([fam,rec])=>`<div class="font-row">
+        <div class="font-sample">${escapeHtml(fam)}</div>
+        <div class="font-info">${rec.subset?'<span class="fi-badge">embedded subset</span> · ':''}${rec.count.toLocaleString()} chars</div>
+      </div>`).join('')+'</div>';
+  }).catch(err=>{const body=overlay.querySelector('#fontListBody');if(body)body.textContent='Error scanning fonts: '+err.message});
+}
+
 // ══════ Search ══════
 let searchResults=[], searchIdx=-1, searchHls=[];
 
@@ -1286,7 +1390,7 @@ document.addEventListener('keydown',e=>{
   if(e.target.contentEditable==='true'||e.target.tagName==='INPUT')return;
   if((e.key==='Delete'||e.key==='Backspace')&&sel){e.preventDefault();deleteAnn(sel.entry,sel.index);return}
   if(e.key==='Enter'&&sel){const a=getAnns(sel.entry.pageNum)[sel.index];if(a&&a.type==='text'){e.preventDefault();editText(sel.entry,sel.index)}return}
-  if(e.key==='Escape'){clearSel();closeSearch();closeOrganizer();_cancelPassword();return}
+  if(e.key==='Escape'){clearSel();closeSearch();closeOrganizer();_cancelPassword();hideFontInfo();return}
   if(e.ctrlKey||e.metaKey){if(e.key==='z'){e.preventDefault();undoLast()}if(e.key==='s'){e.preventDefault();savePdf()}if(e.key==='o'){e.preventDefault();openFile()}if(e.key==='='){e.preventDefault();zoomIn()}if(e.key==='-'){e.preventDefault();zoomOut()}return}
   if(e.code==='Space'&&!e.repeat&&currentTool!=='hand'){e.preventDefault();prevToolBeforeSpace=currentTool;setTool('hand');return}
   if(e.key==='ArrowUp'||e.key==='ArrowLeft'){e.preventDefault();scrollToPage(currentPage-1)}
@@ -1295,6 +1399,7 @@ document.addEventListener('keydown',e=>{
   if(e.key==='h')setTool('hand');if(e.key==='v')setTool('select');if(e.key==='t')setTool('text');if(e.key==='d')setTool('draw');
   if(e.key==='r')setTool('rect');if(e.key==='e')setTool('erase');if(e.key==='c')setTool('circle');if(e.key==='l')setTool('line');if(e.key==='a')setTool('arrow');
   if(e.key==='w')setTool('whiteblock');if(e.key==='b')setTool('table');
+  if(e.key==='f')setTool('font');
 });
 document.addEventListener('keyup',e=>{if(e.code==='Space'&&prevToolBeforeSpace!==null){setTool(prevToolBeforeSpace);prevToolBeforeSpace=null}});
 </script>
