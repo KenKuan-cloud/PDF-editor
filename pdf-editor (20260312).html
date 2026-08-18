@@ -1333,7 +1333,10 @@ function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':
 // page show up as mojibake (e.g. "±ä¸ü¼ÇÂ¼"). Reconstruct the original bytes
 // and decode them as GB18030 (a superset of GBK/GB2312/CP936) to recover the
 // real characters (→ "变更记录"). Returns null when the input isn't mojibake.
-const _cp1252rev={8364:128,8218:130,402:131,8222:132,8230:133,8224:134,8225:135,710:136,8240:137,352:138,8249:139,338:140,381:142,8216:145,8217:146,8220:147,8221:148,8226:149,8211:150,8212:151,732:152,8482:153,353:154,8250:155,339:156,382:158,376:159};
+// Reverse of the bytes 0x80–0xFF as pdf.js emits them through WinAnsi glyph
+// names: the CP1252 high range, plus 0xB5 which resolves to U+03BC (Greek
+// "mu") rather than the micro sign µ. Both µ and μ therefore map to 0xB5.
+const _cp1252rev={8364:128,8218:130,402:131,8222:132,8230:133,8224:134,8225:135,710:136,8240:137,352:138,8249:139,338:140,381:142,8216:145,8217:146,8220:147,8221:148,8226:149,8211:150,8212:151,732:152,8482:153,353:154,8250:155,339:156,382:158,376:159,956:181};
 function _toByte(cp){if(cp<=0xFF)return cp;const b=_cp1252rev[cp];return b===undefined?null:b}
 let _gbkDecoder=null;
 function decodeGbk(str){
@@ -1347,9 +1350,14 @@ function hasCJK(s){return /[㐀-鿿豈-﫿]/.test(s||'')}
 function fixGbk(str){
   if(!str||hasCJK(str))return null;            // already readable / not Chinese
   const d=decodeGbk(str);
-  if(d&&hasCJK(d)&&!/�/.test(d))return d; // decoded to clean Chinese
-  return null;
+  if(!d||!hasCJK(d)||/�/.test(d))return null; // must decode to clean Chinese
+  // Guard against coincidental matches (e.g. "5μm" → a stray hanzi): every
+  // ASCII letter/digit in the source must survive decoding, in order. Real
+  // mojibake keeps its ASCII; an accidental match swallows it as a trail byte.
+  if(!_isSubseq(str.match(/[0-9A-Za-z]/g)||[],d.match(/[0-9A-Za-z]/g)||[]))return null;
+  return d;
 }
+function _isSubseq(a,b){let i=0;for(const x of b){if(i<a.length&&a[i]===x)i++}return i===a.length}
 
 let _fontTip=null;
 function showFontInfo(ev,raw,pt,sample){
